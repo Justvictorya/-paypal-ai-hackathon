@@ -1,0 +1,113 @@
+{
+  "name": "paypal-autonomous-purchase-agent",
+  "description": "Autonomous PayPal payment agent for the PayPal AI Hackathon. An AI agent that initiates and completes real purchases from PayPal-accepting merchants: creates PayPal checkout orders, captures approved orders, and runs a full autonomous purchase flow. Exposes an Express API, an A2A agent card, and a self-describing MCP server. Runs in demo mode without credentials; real PayPal sandbox payments with PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET.",
+  "url": "https://example.com/paypal-autonomous-purchase-agent",
+  "version": "1.0.0",
+  "protocolVersion": "0.3.0",
+  "defaultInputModes": ["text", "application/json"],
+  "defaultOutputModes": ["text", "application/json"],
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "skills": [
+    {
+      "id": "paypal_create_order",
+      "name": "Create PayPal Order",
+      "description": "Agent initiates a PayPal checkout order on behalf of a buyer. Returns orderId and approvalUrl so the buyer can approve and pay.",
+      "tags": ["paypal", "payment", "checkout", "agent", "autonomous-purchase", "ecommerce"],
+      "examples": [
+        "Create a $49.99 PayPal order for the AI Agent Store",
+        "Checkout order: 29.99 USD merchant=Acme Corp",
+        "Create a PayPal purchase order for $5.00"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"],
+      "endpoint": "POST /v1/checkout",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amount": { "type": "string", "description": "Purchase amount, e.g. '49.99'" },
+          "currency": { "type": "string", "description": "Currency code, default USD" },
+          "merchant": { "type": "string", "description": "Merchant name for branding" },
+          "description": { "type": "string", "description": "Order description" },
+          "returnUrl": { "type": "string", "description": "Buyer return URL after approval" },
+          "cancelUrl": { "type": "string", "description": "Buyer cancel URL" }
+        },
+        "required": ["amount"]
+      }
+    },
+    {
+      "id": "paypal_capture_order",
+      "name": "Capture PayPal Order",
+      "description": "Capture an approved PayPal order to complete the purchase and transfer funds to the merchant.",
+      "tags": ["paypal", "payment", "capture", "purchase"],
+      "examples": [
+        "Capture order 5XYZ1234ABCD",
+        "Complete the purchase for order ID 5XYZ1234ABCD"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"],
+      "endpoint": "POST /v1/capture/{orderId}",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": { "type": "string", "description": "PayPal order ID to capture" }
+        },
+        "required": ["orderId"]
+      }
+    },
+    {
+      "id": "paypal_autonomous_purchase",
+      "name": "Autonomous Purchase",
+      "description": "Full autonomous purchase flow: create a PayPal order and capture it. In demo mode the agent auto-approves and captures to show one complete purchase end-to-end.",
+      "tags": ["paypal", "autonomous-purchase", "agent-to-merchant", "checkout", "demo"],
+      "examples": [
+        "Autonomously purchase a $19.99 item from the demo merchant",
+        "Buy a $5.00 product end-to-end through PayPal"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"],
+      "endpoint": "POST /v1/purchase",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amount": { "type": "string", "description": "Purchase amount, e.g. '19.99'" },
+          "currency": { "type": "string", "description": "Currency code, default USD" },
+          "merchant": { "type": "string", "description": "Merchant name" },
+          "description": { "type": "string", "description": "Order description" },
+          "returnUrl": { "type": "string", "description": "Buyer return URL after approval" },
+          "cancelUrl": { "type": "string", "description": "Buyer cancel URL" }
+        },
+        "required": ["amount"]
+      }
+    }
+  ],
+  "supportedLanguages": ["en"],
+  "provider": {
+    "organization": "PayPal AI Hackathon",
+    "url": "https://github.com/example/paypal-ai-hackathon"
+  },
+  "securitySchemes": {
+    "paypalClientCredentials": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "Authorization",
+      "description": "Server uses PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET (env) for PayPal OAuth client_credentials token. Not passed by callers."
+    }
+  },
+  "extensions": {
+    "paypal": {
+      "sandboxApi": "https://api-m.sandbox.paypal.com",
+      "oauth": "/v1/oauth2/token",
+      "createOrder": "/v2/checkout/orders",
+      "captureOrder": "/v2/checkout/orders/{id}/capture",
+      "mcp": "https://mcp.paypal.com/sse",
+      "agentToolkit": "@paypal/agent-toolkit"
+    },
+    "mode": {
+      "demo": "Simulated orders when PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET are unset",
+      "sandbox": "Real PayPal sandbox payments when credentials are set"
+    }
+  }
+}

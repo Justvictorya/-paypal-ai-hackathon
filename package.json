@@ -1,0 +1,25 @@
+{
+  "name": "paypal-ai-hackathon",
+  "version": "1.0.0",
+  "description": "Autonomous PayPal payment agent — an AI agent that initiates and completes real purchases from PayPal-accepting merchants (PayPal AI Hackathon).",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "mcp": "node mcp-server.js",
+    "demo": "node scripts/demo.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@paypal/agent-toolkit": "^1.11.0",
+    "express": "^5.3.0",
+    "ollama": "^0.6.4",
+    "pdfkit": "^0.20.2",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
