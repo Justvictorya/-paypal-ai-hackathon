@@ -744,7 +744,7 @@
 
   <script>
     const API_BASE = '/v1';
-    let currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, category: 'electronics', timeWindow: null };
+    let currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null };
     let currentOrderId = null;
     let currentCaptureId = null;
     let currentProduct = null; // last product the user clicked
@@ -5118,7 +5118,7 @@ const PRODUCT_CATALOG = [
       policyChips.innerHTML = '';
       policyChips.classList.add('hidden');
       policySummary.textContent = 'No policy set';
-      currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, category: 'electronics', timeWindow: null, maxWeekly: 300 };
+      currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null, maxWeekly: 300 };
       renderStorefront();
       // Don't render chips on reset - keep hidden until compile
     });
@@ -5748,7 +5748,10 @@ const prompt = isAttack
     // Initial storefront render — must run after PRODUCT_CATALOG,
     // CATEGORY_KEYWORDS, and renderStorefront are all defined to avoid the
     // temporal-dead-zone.
-    currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, category: 'electronics', timeWindow: null, maxWeekly: 300 };
+    // No category = no spending policy compiled yet, so the storefront shows
+    // the full catalog (plus the attack demo) instead of silently filtering
+    // to one category. The policy summary already reads "No policy set".
+    currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null, maxWeekly: 300 };
     policyChips.classList.add('hidden');
     renderStorefront();
 
