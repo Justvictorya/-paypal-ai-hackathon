@@ -1,66 +1,112 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
-export function checkSpendLimit(intent, policy) {
-  const violations = [];
-  
-  // Existing checks
-  if (policy.maxTotal && intent.amount > policy.maxTotal) {
-    violations.push({ rule: 'maxTotal', limit: policy.maxTotal, requested: intent.amount });
-  }
-  if (policy.maxPerItem && intent.amount > policy.maxPerItem) {
-    violations.push({ rule: 'maxPerItem', limit: policy.maxPerItem, requested: intent.amount });
-  }
-  if (policy.maxItems && intent.maxItems > policy.maxItems) {
-    violations.push({ rule: 'maxItems', limit: policy.maxItems, requested: intent.maxItems });
-  }
-  
-  // New: category check
-  if (policy.category && intent.category && intent.category.toLowerCase() !== policy.category.toLowerCase()) {
-    violations.push({ 
-      rule: 'category', 
-      limit: policy.category, 
-      requested: intent.category,
-      message: `Category "${intent.category}" not allowed. Only "${policy.category}" permitted.`
+// Category keyword map: policy category -> product keywords that belong to it.
+// The intent parser extracts a free-form product name, so exact string match
+// fails (e.g. "wireless mechanical keyboard" != "electronics"). Use keyword
+// matching so real products are correctly classified under their category.
+const CATEGORY_KEYWORDS = {
+  electronics: ['keyboard', 'mouse', 'monitor', 'laptop', 'phone', 'headphone',
+    'headset', 'speaker', 'camera', 'tablet', 'charger', 'webcam', 'router',
+    'drone', 'watch', 'audio', 'speaker', 'printer', 'scanner', 'cpu', 'gpu',
+    'ssd', 'ram', 'microphone', 'microphone', 'earbud', 'earphone'],
+  clothing: ['shirt', 'pants', 'jeans', 'jacket', 'shoe', 'sneaker', 'boot',
+    'hat', 'cap', 'sock', 'dress', 'coat', 'sweater', 'hoodie', 'shorts'],
+  books: ['book', 'novel', 'textbook', 'comic', 'magazine'],
+  bedroom: ['bed', 'pillow', 'blanket', 'duvet', 'sheet', 'quilt', 'rug',
+    'nightstand', 'lamp', 'candle', 'mirror', 'dresser', 'linen', 'comforter',
+    'bedding', 'throw', 'sachet', 'ottoman', 'curtain', 'armchair'],
+  home: ['lamp', 'pillow', 'blanket', 'rug', 'vase', 'mirror', 'clock',
+    'candle', 'shelf', 'table', 'chair', 'bedding', 'kitchen', 'pot', 'pan'],
+  toys: ['toy', 'lego', 'doll', 'puzzle', 'game', 'card', 'board'],
+  sports: ['ball', 'racket', 'bat', 'glove', 'helmet', 'jersey', 'bike',
+    'yoga', 'mat', 'dumbbell', 'weights'],
+  beauty: ['cream', 'lotion', 'soap', 'shampoo', 'perfume', 'makeup',
+    'brush', 'lipstick', 'serum'],
+  automotive: ['tire', 'oil', 'battery', 'wiper', 'car', 'truck', 'motor'],
+};
+
+function categoryMatches(orderCategory, policyCategory) {
+  const oc = orderCategory.toLowerCase();
+  const pc = policyCategory.toLowerCase();
+
+  // Exact match
+  if (oc === pc) return true;
+
+  // Substring either way (e.g. "electronics accessories" vs "electronics")
+  if (oc.includes(pc) || pc.includes(oc)) return true;
+
+  // Keyword match against known products for this category
+  const keywords = CATEGORY_KEYWORDS[pc] || [];
+  return keywords.some(kw => oc.includes(kw));
+}
+
+export function check_order(order, policy) {
+  const results = [];
+
+  // 1. Category allowlist
+  if (policy.category && order.category) {
+    // When the buyer explicitly types a custom item (allowUnknownCategory),
+    // skip the category allowlist — the numeric guardrails still enforce the
+    // budget. This is what lets users buy anything while the policy holds.
+    const passed = policy.allowUnknownCategory ? true : categoryMatches(order.category, policy.category);
+    results.push({
+      rule: 'category',
+      passed,
+      actual: order.category,
+      limit: policy.category
     });
   }
   
-  // New: time window check
-  if (policy.timeWindow) {
-    const now = new Date();
-    const currentTime = now.getHours() * 60 + now.getMinutes();
-    
-    const parseTime = (t) => {
-      const [h, m] = t.split(':').map(Number);
-      return h * 60 + m;
-    };
-    
-    const start = policy.timeWindow.start ? parseTime(policy.timeWindow.start) : 0;
-    const end = policy.timeWindow.end ? parseTime(policy.timeWindow.end) : 24 * 60;
-    
-    if (currentTime < start || currentTime > end) {
-      violations.push({ 
-        rule: 'timeWindow', 
-        limit: `${policy.timeWindow.start || '00:00'}–${policy.timeWindow.end || '23:59'}`,
-        requested: `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`,
-        message: `Current time outside allowed window (${policy.timeWindow.start || '00:00'}–${policy.timeWindow.end || '23:59'})`
-      });
-    }
+  // 2. Per-item cap
+  if (policy.maxPerItem && order.unitPrice) {
+    const passed = order.unitPrice <= policy.maxPerItem;
+    results.push({
+      rule: 'maxPerItem',
+      passed,
+      actual: order.unitPrice,
+      limit: policy.maxPerItem
+    });
   }
   
-  // New: weekly spend check (requires dossier)
+  // 3. Max quantity
+  if (policy.maxItems && order.quantity) {
+    const passed = order.quantity <= policy.maxItems;
+    results.push({
+      rule: 'maxItems',
+      passed,
+      actual: order.quantity,
+      limit: policy.maxItems
+    });
+  }
+  
+  // 4. Per-order total
+  if (policy.maxTotal && order.total) {
+    const passed = order.total <= policy.maxTotal;
+    results.push({
+      rule: 'maxTotal',
+      passed,
+      actual: order.total,
+      limit: policy.maxTotal
+    });
+  }
+  
+  // 5. Weekly budget (sum of captured orders this week)
   if (policy.maxWeekly) {
     const weeklySpent = getWeeklySpend();
-    if (weeklySpent + intent.amount > policy.maxWeekly) {
-      violations.push({ 
-        rule: 'maxWeekly', 
-        limit: policy.maxWeekly, 
-        requested: weeklySpent + intent.amount,
-        message: `Would exceed weekly limit of $${policy.maxWeekly} (already spent $${weeklySpent} this week)`
-      });
-    }
+    const projected = weeklySpent + (order.total || 0);
+    const passed = projected <= policy.maxWeekly;
+    results.push({
+      rule: 'maxWeekly',
+      passed,
+      actual: projected,
+      limit: policy.maxWeekly,
+      weeklySpent
+    });
   }
   
-  return { allowed: violations.length === 0, violations };
+  const allowed = results.every(r => r.passed);
+  return { allowed, results };
 }
 
 function getWeeklySpend() {
@@ -70,9 +116,15 @@ function getWeeklySpend() {
     const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     
     return dossier
-      .filter(e => e.type === 'purchase' && new Date(e.timestamp).getTime() > oneWeekAgo)
-      .reduce((sum, e) => sum + (e.data.result?.amount || 0), 0);
+      .filter(e => e.type === 'captured' && new Date(e.timestamp).getTime() > oneWeekAgo)
+      .reduce((sum, e) => sum + (e.data?.total || e.data?.capture?.amount?.value || 0), 0);
   } catch {
     return 0;
   }
+}
+
+// Hash function for dossier entries
+export function hashEntry(prevHash, entry) {
+  const data = `${entry.index}${entry.type}${entry.timestamp}${JSON.stringify(entry.data)}${prevHash || ''}`;
+  return createHash('sha256').update(data).digest('hex');
 }

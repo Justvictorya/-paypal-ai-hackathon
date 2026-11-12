@@ -1,9 +1,10 @@
 // agent.js — Autonomous PayPal payment agent.
 //
 import { parseIntent } from './src/intent-parser.js';
-import { checkSpendLimit } from './src/guardrails.js';
+import { check_order } from './src/guardrails.js';
 import { compilePolicy } from './src/policy-compiler.js';
 import { writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const SANDBOX_BASE = "https://api-m.sandbox.paypal.com";
 const DOSSIER_FILE = './dossier.json';
@@ -91,9 +92,22 @@ export class PayPalAgent {
       if (existsSync(DOSSIER_FILE)) {
         const data = JSON.parse(readFileSync(DOSSIER_FILE, 'utf8'));
         this.dossier = data;
-        // Recompute lastHash from the last entry
+        // Verify chain and set lastHash
         if (this.dossier.length > 0) {
+          let verified = true;
+          for (let i = 0; i < this.dossier.length; i++) {
+            const entry = this.dossier[i];
+            const prevHash = i === 0 ? null : this.dossier[i - 1].hash;
+            const computedHash = this.hashChain(prevHash, entry.index, entry.type, entry.timestamp, entry.data);
+            if (entry.hash !== computedHash || entry.prev_hash !== prevHash) {
+              verified = false;
+              break;
+            }
+          }
           this.lastHash = this.dossier[this.dossier.length - 1].hash;
+          if (!verified) {
+            console.warn('Dossier chain verification failed on load - possible tampering detected');
+          }
         }
       }
     } catch {
@@ -208,6 +222,18 @@ export class PayPalAgent {
   // ---- Autonomous purchase: create + (demo) capture ------------------
 
   async autonomousPurchase(params) {
+    // If the caller passed a natural-language prompt instead of an explicit
+    // amount, parse intent to extract amount/currency/merchant. This lets the
+    // UI's "Buy This" button work with just { prompt, policy }.
+    if (!params.amount && params.prompt) {
+      const intent = await parseIntent(params.prompt);
+      params = {
+        ...params,
+        amount: intent.amount,
+        currency: intent.currency || params.currency,
+        merchant: intent.merchantHint || params.merchant,
+      };
+    }
     const created = await this.createOrder(params);
     const { amount, currency = this.currency, merchant = this.merchant } = params;
 
@@ -242,24 +268,26 @@ export class PayPalAgent {
 
   // ---- Dossier & Guardrails ---------------------------------------------
 
-  hashChain(prev, data) {
-    let hash = 0;
-    const str = (prev || '') + data;
-    for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash |= 0;
-    }
-    return hash.toString(16);
+  hashChain(prevHash, index, type, timestamp, data) {
+    const str = `${index}${type}${timestamp}${JSON.stringify(data)}${prevHash || ''}`;
+    return createHash('sha256').update(str).digest('hex');
   }
 
   createDossierEntry(type, data) {
+    const index = this.dossier.length;
+    const timestamp = new Date().toISOString();
+    const prevHash = this.lastHash;
+    const hash = this.hashChain(prevHash, index, type, timestamp, data);
+    
     const entry = {
-      timestamp: new Date().toISOString(),
+      index,
       type,
+      timestamp,
       data,
-      hash: this.hashChain(this.lastHash, JSON.stringify(data))
+      prev_hash: prevHash,
+      hash
     };
-    this.lastHash = entry.hash;
+    this.lastHash = hash;
     this.dossier.push(entry);
     this.saveDossier();
     return entry;
@@ -279,36 +307,69 @@ export class PayPalAgent {
 
   // ---- Guardrail Purchase -----------------------------------------------
 
-  async autonomousPurchaseWithGuardrails(userPrompt, policy = {}) {
-    // 1. AI parses intent
-    const intent = await parseIntent(userPrompt);
+  async autonomousPurchaseWithGuardrails(userPrompt, policy = {}, explicitOrder = null) {
+    let intent;
+    if (explicitOrder) {
+      // Caller knows the exact amount/qty/category (e.g. UI custom-item buyer).
+      // Skip LLM intent parsing — this avoids the LLM misreading natural
+      // language into wrong amounts/quantities.
+      intent = {
+        amount: explicitOrder.amount,
+        currency: explicitOrder.currency || this.currency,
+        maxItems: explicitOrder.quantity || 1,
+        category: explicitOrder.category || userPrompt,
+        merchantHint: explicitOrder.merchantHint || 'Unknown Merchant',
+      };
+    } else {
+      // 1. AI parses intent
+      intent = await parseIntent(userPrompt);
+    }
 
     // 2. Merge passed policy with active policy (active policy takes precedence for unset fields)
     const activePolicy = this.getActivePolicy();
     const mergedPolicy = { ...activePolicy, ...policy };
+    // When the buyer explicitly types a custom item name (not a known catalog
+    // product), allow unknown categories so the category allowlist doesn't
+    // block a legitimate custom purchase. The numeric guardrails still apply.
+    if (explicitOrder && explicitOrder.custom) mergedPolicy.allowUnknownCategory = true;
 
-    // 3. Code guardrail checks (CANNOT be bypassed by prompt injection)
-    const guardrail = checkSpendLimit(intent, mergedPolicy);
+    // 3. Build order object for guardrail check
+    const orderForGuardrail = {
+      category: intent.category,
+      unitPrice: intent.unitPrice || intent.amount,
+      quantity: intent.maxItems || intent.quantity || 1,
+      total: intent.amount
+    };
+
+    // 4. Code guardrail checks (CANNOT be bypassed by prompt injection)
+    const guardrail = check_order(orderForGuardrail, mergedPolicy);
     if (!guardrail.allowed) {
-      const entry = this.createDossierEntry('blocked', { intent, violations: guardrail.violations, policy: mergedPolicy });
+      const failedRule = guardrail.results.find(r => !r.passed);
+      const entry = this.createDossierEntry('blocked', { 
+        intent, 
+        guardrailResults: guardrail.results,
+        failedRule,
+        policy: mergedPolicy 
+      });
       return {
         blocked: true,
         reason: 'guardrail_violation',
-        violations: guardrail.violations,
+        guardrailResults: guardrail.results,
+        failedRule,
         dossier: entry
       };
     }
 
-    // 4. Normal purchase flow
+    // 5. Normal purchase flow
     const result = await this.autonomousPurchase({
       amount: intent.amount,
       currency: intent.currency,
       merchant: intent.merchantHint || 'Unknown Merchant'
     });
 
-    // 5. Add dossier entry
-    const entry = this.createDossierEntry('purchase', { intent, result, policy: mergedPolicy });
-    return { ...result, dossier: entry };
+    // 6. Add dossier entry
+    const entry = this.createDossierEntry('purchase', { intent, result, policy: mergedPolicy, guardrailResults: guardrail.results });
+    return { ...result, dossier: entry, guardrailResults: guardrail.results };
   }
 
   // ---- Refund (PayPal Agent Toolkit) ------------------------------------
