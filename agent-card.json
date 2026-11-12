@@ -1,6 +1,6 @@
 {
   "name": "vouch",
-  "description": "Vouch — an autonomous payment agent for the PayPal AI Hackathon. An AI agent that initiates and completes real purchases through PayPal-accepting merchants: creates PayPal checkout orders, captures approved orders, and runs a full autonomous purchase flow. Exposes an Express API, an A2A agent card, and a self-describing MCP server. Runs in demo mode without credentials; real PayPal sandbox payments with PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET.",
+  "description": "Vouch — spending guardrails for autonomous agents. Two things: (1) buy safely — an agent that completes purchases through PayPal while a Code-Level Guardrail Engine checks every order BEFORE it reaches PayPal, so no misread quantity and no prompt injection can overspend; (2) cancel before you're charged — scans your PayPal subscriptions and auto-cancels free trials that breach your spending policy before they auto-renew. Every action lands in a SHA-256 hash-chained audit dossier. Runs in demo mode without credentials; real PayPal sandbox with PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET.",
   "url": "https://paypal-ai-hackathon-emia.onrender.com",
   "version": "1.0.0",
   "protocolVersion": "0.3.0",
@@ -12,59 +12,13 @@
   },
   "skills": [
     {
-      "id": "paypal_create_order",
-      "name": "Create PayPal Order",
-      "description": "Agent initiates a PayPal checkout order on behalf of a buyer. Returns orderId and approvalUrl so the buyer can approve and pay.",
-      "tags": ["paypal", "payment", "checkout", "agent", "autonomous-purchase", "ecommerce"],
+      "id": "guarded_autonomous_purchase",
+      "name": "Buy Safely",
+      "description": "Complete a purchase through PayPal with spending guardrails enforced in code, not in a prompt. The buyer sets a plain-language policy (category, per-item cap, max quantity, per-order total, weekly budget, time window); the agent compiles it to structured rules and a deterministic check_order() validates the exact order facts BEFORE any PayPal call. If it fails, the order is rejected and zero calls go to PayPal. This is what blocks prompt injection: a seller note cannot override code-level limits. Returns orderId, approvalUrl, capture, and the dossier entry.",
+      "tags": ["paypal", "payment", "autonomous-purchase", "guardrails", "agent-to-merchant", "ecommerce", "checkout"],
       "examples": [
-        "Create a $49.99 PayPal order for the AI Agent Store",
-        "Checkout order: 29.99 USD merchant=Acme Corp",
-        "Create a PayPal purchase order for $5.00"
-      ],
-      "inputModes": ["application/json"],
-      "outputModes": ["application/json"],
-      "endpoint": "POST /v1/checkout",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "amount": { "type": "string", "description": "Purchase amount, e.g. '49.99'" },
-          "currency": { "type": "string", "description": "Currency code, default USD" },
-          "merchant": { "type": "string", "description": "Merchant name for branding" },
-          "description": { "type": "string", "description": "Order description" },
-          "returnUrl": { "type": "string", "description": "Buyer return URL after approval" },
-          "cancelUrl": { "type": "string", "description": "Buyer cancel URL" }
-        },
-        "required": ["amount"]
-      }
-    },
-    {
-      "id": "paypal_capture_order",
-      "name": "Capture PayPal Order",
-      "description": "Capture an approved PayPal order to complete the purchase and transfer funds to the merchant.",
-      "tags": ["paypal", "payment", "capture", "purchase"],
-      "examples": [
-        "Capture order 5XYZ1234ABCD",
-        "Complete the purchase for order ID 5XYZ1234ABCD"
-      ],
-      "inputModes": ["application/json"],
-      "outputModes": ["application/json"],
-      "endpoint": "POST /v1/capture/{orderId}",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "orderId": { "type": "string", "description": "PayPal order ID to capture" }
-        },
-        "required": ["orderId"]
-      }
-    },
-    {
-      "id": "paypal_autonomous_purchase",
-      "name": "Autonomous Purchase",
-      "description": "Full autonomous purchase flow: create a PayPal order and capture it. In demo mode the agent auto-approves and captures to show one complete purchase end-to-end.",
-      "tags": ["paypal", "autonomous-purchase", "agent-to-merchant", "checkout", "demo"],
-      "examples": [
-        "Autonomously purchase a $19.99 item from the demo merchant",
-        "Buy a $5.00 product end-to-end through PayPal"
+        "Buy a $49.99 keyboard; my policy is electronics only, max $150 per item",
+        "Purchase 2 items under $300 total; nothing after 10pm"
       ],
       "inputModes": ["application/json"],
       "outputModes": ["application/json"],
@@ -72,21 +26,47 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "amount": { "type": "string", "description": "Purchase amount, e.g. '19.99'" },
-          "currency": { "type": "string", "description": "Currency code, default USD" },
-          "merchant": { "type": "string", "description": "Merchant name" },
-          "description": { "type": "string", "description": "Order description" },
-          "returnUrl": { "type": "string", "description": "Buyer return URL after approval" },
-          "cancelUrl": { "type": "string", "description": "Buyer cancel URL" }
+          "prompt": { "type": "string", "description": "Natural-language purchase intent" },
+          "policy": { "type": "object", "description": "Compiled spending policy (or plain-language policy object)" },
+          "explicitOrder": {
+            "type": "object",
+            "description": "Exact order facts so the LLM can't misparse quantities",
+            "properties": {
+              "amount": { "type": "number" },
+              "quantity": { "type": "number" },
+              "category": { "type": "string" },
+              "merchantHint": { "type": "string" },
+              "custom": { "type": "boolean" }
+            }
+          }
         },
-        "required": ["amount"]
+        "required": ["prompt"]
+      }
+    },
+    {
+      "id": "subscription_management",
+      "name": "Cancel Before You're Charged",
+      "description": "The money-leak fix. Lists the buyer's PayPal billing agreements, checks each one against the active spending policy, and cancels the ones that would breach it BEFORE they auto-renew — so a forgotten free trial never charges you. Subscriptions that are within policy are kept with a reason. Each cancellation and review is appended to the hash-chained audit dossier. In demo mode three sample subscriptions are provided (Adobe, Spotify, Netflix).",
+      "tags": ["paypal", "subscriptions", "billing-agreements", "cancel", "free-trial", "recurring", "guardrails"],
+      "examples": [
+        "Review my subscriptions and cancel anything over $20",
+        "My free trials keep charging me — stop the ones I don't want"
+      ],
+      "inputModes": ["application/json"],
+      "outputModes": ["application/json"],
+      "endpoint": "POST /v1/subscriptions/review",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "policy": { "type": "object", "description": "Optional policy override; defaults to the active compiled policy" }
+        }
       }
     }
   ],
   "supportedLanguages": ["en"],
   "provider": {
     "organization": "PayPal AI Hackathon",
-    "url": "https://github.com/example/paypal-ai-hackathon"
+    "url": "https://github.com/Justvictorya/-paypal-ai-hackathon"
   },
   "securitySchemes": {
     "paypalClientCredentials": {
@@ -102,12 +82,13 @@
       "oauth": "/v1/oauth2/token",
       "createOrder": "/v2/checkout/orders",
       "captureOrder": "/v2/checkout/orders/{id}/capture",
+      "subscriptions": "/v1/billing/subscriptions",
       "mcp": "https://mcp.paypal.com/sse",
       "agentToolkit": "@paypal/agent-toolkit"
     },
     "mode": {
-      "demo": "Simulated orders when PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET are unset",
-      "sandbox": "Real PayPal sandbox payments when credentials are set"
+      "demo": "Simulated orders and subscriptions when PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET are unset",
+      "sandbox": "Real PayPal sandbox payments and billing agreements when credentials are set"
     }
   }
 }
