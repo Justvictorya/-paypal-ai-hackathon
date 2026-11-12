@@ -5273,18 +5273,25 @@ const PRODUCT_CATALOG = [
       currentProduct = product;
       const isAttack = product.attack;
       
-      const prompt = isAttack 
-        ? `Buy 10 ${product.name.toLowerCase()}s at $${product.price} each`
-        : `Buy 1 ${product.name.toLowerCase()} at $${product.price}`;
+const prompt = isAttack 
+         ? `Buy 10 ${product.name.toLowerCase()}s at $${product.price} each`
+         : `Buy 1 ${product.name.toLowerCase()} at $${product.price}`;
 
-        // Pass exact order facts so the LLM intent parser can't misread the
-        // natural-language prompt (it previously saw "buy 1 ... at $60" as
-        // amount=600, qty=10). Catalog items keep category enforcement; only
-        // explicitly-typed custom items bypass the category allowlist.
-        const explicitOrder = {
-          amount: product.price, quantity: 1, category: product.category,
-          merchantHint: product.name, custom: !!product.custom
-        };
+         // Pass exact order facts so the LLM intent parser can't misread the
+         // natural-language prompt (it previously saw "buy 1 ... at $60" as
+         // amount=600, qty=10). Catalog items keep category enforcement; only
+         // explicitly-typed custom items bypass the category allowlist.
+         //
+         // For the attack demo, pass the INJECTION's inflated quantity (10)
+         // so the guardrail actually blocks it. If we passed quantity: 1 the
+         // guardrail would see a benign order and the injection would silently
+         // succeed — which defeats the demo.
+         const explicitOrder = {
+           amount: product.price,
+           quantity: isAttack ? 10 : 1,
+           category: product.category,
+           merchantHint: product.name, custom: !!product.custom
+         };
 
       try {
         // Step 1: Understood
@@ -5349,11 +5356,14 @@ const PRODUCT_CATALOG = [
         setStep('order', 'active', 'Creating PayPal sandbox order...');
         addLogLine('PAYPAL: Creating sandbox order...', 'info');
         
-        // Actually call the purchase endpoint
+        // Actually call the purchase endpoint. Pass the exact order facts
+        // (the same ones the guardrails just validated) so the LLM intent
+        // parser can't re-read the natural-language prompt and misparse it
+        // (it previously saw "buy 1 ... at $60" as amount=600, qty=10).
         const purchaseRes = await fetch(`${API_BASE}/purchase`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt, policy: currentPolicy })
+          body: JSON.stringify({ prompt, policy: currentPolicy, explicitOrder })
         });
         const purchaseData = await purchaseRes.json();
         

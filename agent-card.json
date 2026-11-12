@@ -1,7 +1,7 @@
 {
-  "name": "paypal-autonomous-purchase-agent",
-  "description": "Autonomous PayPal payment agent for the PayPal AI Hackathon. An AI agent that initiates and completes real purchases from PayPal-accepting merchants: creates PayPal checkout orders, captures approved orders, and runs a full autonomous purchase flow. Exposes an Express API, an A2A agent card, and a self-describing MCP server. Runs in demo mode without credentials; real PayPal sandbox payments with PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET.",
-  "url": "https://example.com/paypal-autonomous-purchase-agent",
+  "name": "vouch",
+  "description": "Vouch — an autonomous payment agent for the PayPal AI Hackathon. An AI agent that initiates and completes real purchases through PayPal-accepting merchants: creates PayPal checkout orders, captures approved orders, and runs a full autonomous purchase flow. Exposes an Express API, an A2A agent card, and a self-describing MCP server. Runs in demo mode without credentials; real PayPal sandbox payments with PAYPAL_CLIENT_ID/PAYPAL_CLIENT_SECRET.",
+  "url": "https://paypal-ai-hackathon-emia.onrender.com",
   "version": "1.0.0",
   "protocolVersion": "0.3.0",
   "defaultInputModes": ["text", "application/json"],

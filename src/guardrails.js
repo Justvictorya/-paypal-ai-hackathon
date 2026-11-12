@@ -105,6 +105,26 @@ export function check_order(order, policy) {
     });
   }
   
+  // 6. Time window (e.g. "nothing after 10pm" -> { end: "22:00" })
+  if (policy.timeWindow) {
+    const tw = policy.timeWindow;
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const toMin = (t) => {
+      const [h, m] = String(t).split(':').map(Number);
+      return h * 60 + m;
+    };
+    let passed = true;
+    if (tw.start && nowMin < toMin(tw.start)) passed = false;
+    if (tw.end && nowMin > toMin(tw.end)) passed = false;
+    results.push({
+      rule: 'timeWindow',
+      passed,
+      actual: `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`,
+      limit: `${tw.start || '00:00'} - ${tw.end || '23:59'}`
+    });
+  }
+  
   const allowed = results.every(r => r.passed);
   return { allowed, results };
 }
@@ -115,9 +135,11 @@ function getWeeklySpend() {
     const dossier = JSON.parse(readFileSync('./dossier.json', 'utf8'));
     const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     
+    // Dossier entries are stored as 'purchase' (successful) and 'blocked'.
+    // Only count successful purchases toward the weekly budget.
     return dossier
-      .filter(e => e.type === 'captured' && new Date(e.timestamp).getTime() > oneWeekAgo)
-      .reduce((sum, e) => sum + (e.data?.total || e.data?.capture?.amount?.value || 0), 0);
+      .filter(e => e.type === 'purchase' && new Date(e.timestamp).getTime() > oneWeekAgo)
+      .reduce((sum, e) => sum + (e.data?.result?.amount || e.data?.total || 0), 0);
   } catch {
     return 0;
   }

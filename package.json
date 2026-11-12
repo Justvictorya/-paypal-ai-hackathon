@@ -1,7 +1,7 @@
 {
-  "name": "paypal-ai-hackathon",
+  "name": "vouch",
   "version": "1.0.0",
-  "description": "Autonomous PayPal payment agent — an AI agent that initiates and completes real purchases from PayPal-accepting merchants (PayPal AI Hackathon).",
+  "description": "Vouch — an autonomous payment agent that initiates and completes real purchases through PayPal-accepting merchants (PayPal AI Hackathon).",
   "type": "module",
   "main": "server.js",
   "scripts": {

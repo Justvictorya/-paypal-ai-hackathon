@@ -221,15 +221,32 @@ export class PayPalAgent {
 
   // ---- Autonomous purchase: create + (demo) capture ------------------
 
-  async autonomousPurchase(params) {
-    // If the caller passed a natural-language prompt instead of an explicit
-    // amount, parse intent to extract amount/currency/merchant. This lets the
-    // UI's "Buy This" button work with just { prompt, policy }.
-    if (!params.amount && params.prompt) {
-      const intent = await parseIntent(params.prompt);
+async autonomousPurchase(params) {
+    // If the caller passed an explicit order (amount/qty/category known),
+    // use it directly instead of re-parsing the prompt through the LLM.
+    // The guardrails already validated these exact facts, and the LLM is
+    // unreliable on quantities (it read "buy 10 at $60" as amount=600).
+    if (!params.amount && params.explicitOrder) {
+      const eo = params.explicitOrder;
       params = {
         ...params,
-        amount: intent.amount,
+        amount: eo.amount,
+        currency: eo.currency || params.currency,
+        merchant: eo.merchantHint || params.merchant,
+      };
+    }
+    // Otherwise, if a natural-language prompt was passed, parse intent.
+    if (!params.amount && params.prompt) {
+      const intent = await parseIntent(params.prompt);
+      // LLM often returns null for amount when the prompt is vague
+      // (e.g. "buy a skincare set"). Fall back to the policy's maxTotal
+      // so the order can still be created rather than throwing.
+      const policyMax = params.policy && params.policy.maxTotal;
+      const amount = intent.amount != null ? intent.amount
+        : (policyMax != null ? policyMax : 25);
+      params = {
+        ...params,
+        amount,
         currency: intent.currency || params.currency,
         merchant: intent.merchantHint || params.merchant,
       };
