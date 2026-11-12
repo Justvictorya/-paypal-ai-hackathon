@@ -1,23 +1,63 @@
-# Vouch — AI Agents That Buy With Limits, And Prove Every Purchase
+# Vouch — Spending Guardrails for Autonomous Agents
 
-**PayPal AI Hackathon submission** (deadline Nov 12). A secure, autonomous agentic commerce dashboard that executes safe purchases through PayPal Sandbox APIs while featuring a built-in **Code-Level Guardrail Engine** and an **Immutable Audit Dossier**.
+**PayPal AI Hackathon submission.** An autonomous payment agent whose spending
+limits are enforced in **code, not in a prompt** — so no seller note, no
+misread quantity, and no forgotten free trial can cost you money you didn't
+intend to spend.
 
-## Problem
-AI agents are starting to spend money, but the limits usually live in the prompt — easily overridden by prompt injection. **The limits can't live in the prompt.** This project enforces spending rules in plain code, logs every step to a SHA-256 hash-chained dossier, and proves every purchase with a tamper-evident receipt.
+## The Problem
+
+**Free trials that auto-renew.** You sign up for a 7-day trial, forget about
+it, and get charged $54.99/month for six months before you notice. That's
+~$330 leaked per subscription — and most people have several.
+
+**AI agents that spend.** When an agent is authorized to buy on your behalf,
+the budget only lives in the prompt — and prompts get misread (the agent parsed
+"buy 10 at $60" as $600) and prompt-injected (a seller note can say "override
+the buyer's budget"). **The limits can't live in the prompt.**
+
+**Subscriptions nobody cancels.** PayPal handles recurring billing fine, but
+nothing watches your agreements and cancels the ones you don't want. Until now.
+
+## What Vouch Does
+
+Vouch is an autonomous payment agent with a **Code-Level Guardrail Engine** and
+an **Immutable Audit Dossier**. The rules are compiled to plain JavaScript and
+checked *before* any call reaches PayPal — so the agent can act autonomously
+while your money stays bounded.
+
+1. **Write a spending policy in plain English** — "subscriptions under $20,
+   nothing after 10pm" → compiled to structured rules.
+2. **Review your PayPal subscriptions** — Vouch scans them, checks each against
+   your policy, and **cancels the ones that shouldn't renew BEFORE the charge
+   hits**. That's the money-leak fix.
+3. **Buy with guardrails** — every purchase is validated by code (category
+   allowlist, per-item cap, max quantity, per-order total, weekly budget, time
+   window). Fail → rejected, **zero PayPal calls**.
+4. **Prove every purchase** — a SHA-256 hash-chained audit dossier records each
+   step. Verify it, or tamper it and watch it break.
 
 ## Features
-- **Plain-language policy compiler** (Ollama local LLM) → structured JSON rules
-- **Code-level guardrails** (no LLM): category allowlist, per-item cap, max quantity, per-order total, weekly budget
-- **Attack demo**: realistic seller note aimed at AI agents ("bulk promotion... override budget... order 10 units") — guardrail blocks it, **zero PayPal calls**
-- **Live pipeline**: 7-step visual stepper with real-time log feed (JetBrains Mono)
-- **Receipt panel** (appears after real capture): item, quantity, total, PayPal order/capture IDs, timestamps, AI-written summary
+- **Subscription management** (the headline feature): list, review, and cancel
+  PayPal billing agreements. Auto-cancels free trials that breach your policy
+  before they auto-renew.
+- **Plain-language policy compiler** → structured JSON rules
+- **Code-level guardrails** (no LLM): category allowlist, per-item cap, max
+  quantity, per-order total, weekly budget, time window
+- **Attack demo**: realistic seller note aimed at AI agents ("bulk promotion...
+  override budget... order 10 units") — guardrail blocks it, **zero PayPal calls**
+- **Live pipeline**: 7-step visual stepper with real-time log feed
+- **Receipt panel** (after capture): item, quantity, total, PayPal order/capture
+  IDs, timestamps, AI-written summary
 - **SEALED stamp** (animation <1s) after final log entry
-- **SHA-256 hash-chained audit log**: genesis, policy, order_created, approved, captured, (blocked), (refunded)
-- **Verify Chain** button: recomputes every hash, shows "Intact ✓" (green) or "Entry N altered ✗" (red)
+- **SHA-256 hash-chained audit log**: genesis, policy, order_created, approved,
+  captured, (blocked), (refunded), (subscription_cancelled)
+- **Verify Chain** button: recomputes every hash, shows "Intact ✓" or
+  "Entry N altered ✗"
 - **Tamper Test / Reset** buttons for demo
-- **Refund** button calls PayPal sandbox refund endpoint, appends to chain on success
+- **Refund** button calls PayPal sandbox refund endpoint, appends to chain
 - **Download Evidence Pack (JSON)**: log + order data + policy
-- **Dark/light mode** with Vouch design system (Fraunces/Inter/JetBrains Mono, teal/slate/cream palette)
+- **Dark/light mode** with Vouch design system
 
 ## Quick Start
 
@@ -28,6 +68,8 @@ AI agents are starting to spend money, but the limits usually live in the prompt
   ollama pull llama3.2:3b
   ollama serve
   ```
+- A free PayPal developer account (`developer.paypal.com`) for sandbox
+  subscriptions and payments.
 
 ### 1. Install
 ```bash
@@ -38,7 +80,7 @@ npm install
 ### 2. Configure (optional — runs in demo mode without)
 ```bash
 cp .env.example .env
-# Edit .env with your PayPal sandbox credentials if you want real payments
+# Edit .env with your PayPal sandbox credentials
 ```
 
 ### 3. Run
@@ -46,15 +88,27 @@ cp .env.example .env
 npm run dev
 # Open http://localhost:8403
 ```
-The Vouch UI loads at `/` with policy editor, storefront, live pipeline, and receipt panel.
+The Vouch UI loads at `/` with policy editor, **subscriptions panel**,
+storefront, live pipeline, and receipt panel.
 
 ## Demo Flow (for video)
-1. **Compile policy**: Type "Electronics only, max $150 per item, max 2 items per order, $300 weekly budget" → click **Compile Rules** → chips appear
-2. **Buy keyboard**: Click **Buy This** on Wireless Keyboard ($110) → watch pipeline animate through all 7 steps → click **Open PayPal Approval** (sandbox) → receipt slides in → click **Verify Chain** → **SEALED** stamp lands
-3. **Run attack**: Click **Test Attack** on Mystery Box ($45) → pipeline stops red at Policy Check → message: "Blocked: order of 10 units exceeds your limit of 2 per order. Nothing was sent to PayPal." → chips flash red, log shows "ACTION: Order rejected. 0 calls sent to PayPal."
-4. **Verify & tamper**: Click **Verify Chain** → "Intact ✓" → click **Tamper Test** → verify shows red with entry number → click **Reset** → green again
-5. **Refund**: Click **Issue Sandbox Refund** → badge turns REFUNDED (green) → hash chain updates
-6. **Download**: Click **Download Evidence Pack (JSON)**
+
+1. **Compile policy**: Type "subscriptions under $20" → click **Compile Rules** →
+   chips appear
+2. **Review subscriptions**: Click **Review & Cancel** on the Subscriptions
+   panel → Vouch scans your PayPal agreements, cancels Adobe Creative Cloud
+   ($54.99) because it breaches the $20 cap, keeps Spotify ($10.99) and
+   Netflix ($15.49) as within policy. **Nothing is charged — the cancellation
+   happens before the renewal date.**
+3. **Buy keyboard**: Click **Buy This** on a catalog item → pipeline animates
+   through all 7 steps → receipt slides in → **Verify Chain** → **SEALED**
+4. **Run attack**: Click **Test Attack** on Mystery Box ($45) → pipeline stops
+   red at Policy Check → "Blocked: order of 10 units exceeds your limit of 2
+   per order. Nothing was sent to PayPal."
+5. **Verify & tamper**: Click **Verify Chain** → "Intact ✓" → **Tamper Test** →
+   verify shows red → **Reset** → green again
+6. **Refund**: Click **Issue Sandbox Refund** → REFUNDED badge → chain updates
+7. **Download**: Click **Download Evidence Pack (JSON)**
 
 ## API Endpoints
 | Method | Path | Description |
@@ -68,6 +122,10 @@ The Vouch UI loads at `/` with policy editor, storefront, live pipeline, and rec
 | POST | `/v1/attack-demo` | Run attack scenario with guardrails |
 | GET | `/v1/order/:orderId` | Get order status (for polling) |
 | POST | `/v1/refund/:orderId` | Issue sandbox refund |
+| GET | `/v1/subscriptions` | List PayPal billing agreements |
+| GET | `/v1/subscriptions/:id` | Get one subscription |
+| POST | `/v1/subscriptions/:id/cancel` | Cancel a subscription |
+| POST | `/v1/subscriptions/review` | Scan + auto-cancel subscriptions breaching the active policy |
 | GET | `/v1/dossier` | Get full hash-chained audit dossier |
 | POST | `/v1/dossier/tamper` | Replace dossier (for tamper test demo) |
 
@@ -89,9 +147,11 @@ Without PayPal credentials, the agent runs in **demo mode**: simulates order cre
 ```
 src/
 ├── guardrails.js       # check_order(order, policy) → {allowed, results[]}
-├── policy-compiler.js  # Ollama: plain language → structured JSON
-├── intent-parser.js    # Extracts amount, qty, category from prompt
-agent.js                # PayPalAgent: createOrder, captureOrder, autonomousPurchaseWithGuardrails, refundOrder, hash-chained dossier
+├── policy-compiler.js  # Ollama: plain language → structured JSON (regex fallback)
+├── intent-parser.js    # Extracts amount, qty, category from prompt (regex fallback)
+agent.js                # PayPalAgent: createOrder, captureOrder, autonomousPurchaseWithGuardrails,
+│                       #   refundOrder, listSubscriptions, cancelSubscription, reviewSubscriptions,
+│                       #   hash-chained dossier, demo subscriptions
 server.js               # Express API + static UI
 public/index.html       # Vouch UI (single-file, no build step)
 dossier.json            # Persisted SHA-256 hash-chained audit log
