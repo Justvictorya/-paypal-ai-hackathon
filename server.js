@@ -140,6 +140,44 @@ app.post("/v1/refund/:orderId", async (req, res) => {
   }
 });
 
+// ---- Subscriptions (PayPal Billing Agreements) -------------------------
+app.get("/v1/subscriptions", async (_req, res) => {
+  try {
+    const result = await agent.listSubscriptions();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message, demo: agent.demo });
+  }
+});
+
+app.get("/v1/subscriptions/:subscriptionId", async (req, res) => {
+  try {
+    const result = await agent.getSubscription(req.params.subscriptionId);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(404).json({ ok: false, error: err.message, demo: agent.demo });
+  }
+});
+
+app.post("/v1/subscriptions/:subscriptionId/cancel", async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const result = await agent.cancelSubscription(req.params.subscriptionId, reason);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message, demo: agent.demo });
+  }
+});
+
+app.post("/v1/subscriptions/review", async (req, res) => {
+  try {
+    const result = await agent.reviewSubscriptions();
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message, demo: agent.demo });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`PayPal autonomous purchase agent listening on http://localhost:${PORT}`);
   console.log(`  mode:     ${agent.demo ? "DEMO (simulated)" : "sandbox"}`);

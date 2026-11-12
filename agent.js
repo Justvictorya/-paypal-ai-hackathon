@@ -82,6 +82,11 @@ export class PayPalAgent {
     this.merchant = opts.merchant || process.env.PAYPAL_MERCHANT || "PayPal Merchant";
     this.currency = opts.currency || process.env.PAYPAL_CURRENCY || "USD";
     this.orders = new Map(); // in-memory demo order store
+    this.subscriptions = [ // demo subscriptions (free trials that auto-renew)
+      { id: 'I-ABC123', status: 'ACTIVE', product: 'Adobe Creative Cloud (7-day trial)', amount: 54.99, currency: 'USD', nextBillingDate: new Date(Date.now() + 2 * 86400000).toISOString(), billingInfo: { amount: { value: '54.99', currency_code: 'USD' } } },
+      { id: 'I-DEF456', status: 'ACTIVE', product: 'Spotify Premium (30-day trial)', amount: 10.99, currency: 'USD', nextBillingDate: new Date(Date.now() + 1 * 86400000).toISOString(), billingInfo: { amount: { value: '10.99', currency_code: 'USD' } } },
+      { id: 'I-GHI789', status: 'ACTIVE', product: 'Netflix Premium (free month)', amount: 15.49, currency: 'USD', nextBillingDate: new Date(Date.now() + 5 * 86400000).toISOString(), billingInfo: { amount: { value: '15.49', currency_code: 'USD' } } },
+    ];
     this.dossier = []; // audit trail for tamper-evident logging
     this.lastHash = null; // hash chain for dossier integrity
     this.loadDossier();
@@ -427,7 +432,7 @@ async autonomousPurchase(params) {
       });
       
       const entry = this.createDossierEntry('refund', { orderId, refund, amount: amount || refund.amount?.value });
-      return { refund, demo: false, dossier: entry };
+return { refund, demo: false, dossier: entry };
     } catch (err) {
       // Fallback to direct API if toolkit fails
       const token = await clientCredentialsToken();
@@ -439,7 +444,91 @@ async autonomousPurchase(params) {
       
       const entry = this.createDossierEntry('refund', { orderId, refund, amount: amount || refund.amount?.value });
       return { refund, demo: false, dossier: entry };
-}
+    }
+  }
+
+  // ---- Subscriptions (PayPal Billing Agreements) -------------------------
+  // The real-world use case: free trials that auto-renew and leak money
+  // because the subscriber forgot. Vouch watches subscriptions, checks each
+  // one against the active spending policy, and cancels the ones that
+  // shouldn't renew — BEFORE the charge hits.
+
+  listSubscriptions() {
+    if (this.demo) {
+      return { demo: true, subscriptions: [...this.subscriptions] };
+    }
+    // Real path: PayPal Subscriptions API v1 (billing agreements)
+    return (async () => {
+      const token = await clientCredentialsToken();
+      const data = await paypalFetch('/v1/billing/subscriptions', { method: 'GET', token });
+      return { demo: false, subscriptions: data.items || [] };
+    })();
+  }
+
+  getSubscription(subscriptionId) {
+    if (this.demo) {
+      const sub = this.subscriptions.find(s => s.id === subscriptionId);
+      if (!sub) throw new Error(`Subscription not found: ${subscriptionId}`);
+      return { demo: true, subscription: sub };
+    }
+    return (async () => {
+      const token = await clientCredentialsToken();
+      const sub = await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: 'GET', token });
+      return { demo: false, subscription: sub };
+    })();
+  }
+
+  cancelSubscription(subscriptionId, reason = 'Cancelled by Vouch spending policy') {
+    if (this.demo) {
+      const sub = this.subscriptions.find(s => s.id === subscriptionId);
+      if (!sub) throw new Error(`Subscription not found: ${subscriptionId}`);
+      if (sub.status === 'CANCELLED') throw new Error(`Subscription already cancelled: ${subscriptionId}`);
+      sub.status = 'CANCELLED';
+      sub.cancelledAt = new Date().toISOString();
+      sub.cancelReason = reason;
+      const entry = this.createDossierEntry('subscription_cancelled', { subscriptionId, reason, subscription: sub });
+      return { demo: true, subscription: sub, dossier: entry };
+    }
+    return (async () => {
+      const token = await clientCredentialsToken();
+      const sub = await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, {
+        method: 'POST', token,
+        body: { reason }
+      });
+      const entry = this.createDossierEntry('subscription_cancelled', { subscriptionId, reason, subscription: sub });
+      return { demo: false, subscription: sub, dossier: entry };
+    })();
+  }
+
+  // Scan all subscriptions; cancel any whose next charge would breach the
+  // active spending policy. Returns what was cancelled and why.
+  async reviewSubscriptions() {
+    const { subscriptions } = await this.listSubscriptions();
+    const policy = this.getActivePolicy();
+    const now = new Date();
+    const cancelled = [];
+    const kept = [];
+
+    for (const sub of subscriptions) {
+      if (sub.status && sub.status !== 'ACTIVE') { kept.push({ sub, reason: `status=${sub.status}` }); continue; }
+      const nextCharge = sub.nextBillingDate ? new Date(sub.nextBillingDate) : null;
+      const daysUntil = nextCharge ? Math.round((nextCharge - now) / 86400000) : null;
+      const amount = parseFloat(sub.billingInfo?.amount?.value || sub.amount || 0);
+
+      // Cancel if the renewal is imminent and would breach the policy.
+      const breaches = [];
+      if (policy.maxTotal && amount > policy.maxTotal) breaches.push(`$${amount} exceeds max $${policy.maxTotal}`);
+      if (policy.maxPerItem && amount > policy.maxPerItem) breaches.push(`$${amount} exceeds per-item cap $${policy.maxPerItem}`);
+
+      if (daysUntil !== null && daysUntil <= 3 && breaches.length > 0) {
+        await this.cancelSubscription(sub.id, `Policy breach: ${breaches.join('; ')}`);
+        cancelled.push({ sub, reason: breaches.join('; '), daysUntil });
+      } else {
+        kept.push({ sub, reason: breaches.length ? `breaches policy but renews in ${daysUntil}d — left for review` : 'within policy', daysUntil });
+      }
+    }
+    const entry = this.createDossierEntry('subscription_review', { total: subscriptions.length, cancelled: cancelled.length, kept: kept.length, cancelled, kept });
+    return { demo: this.demo, total: subscriptions.length, cancelled, kept, dossier: entry };
   }
 
   capabilities() {
@@ -448,7 +537,7 @@ async autonomousPurchase(params) {
       version: "1.0.0",
       demo: this.demo,
       sandboxBase: SANDBOX_BASE,
-      methods: ["createOrder", "captureOrder", "getOrder", "autonomousPurchase", "autonomousPurchaseWithGuardrails", "compileAndSetPolicy", "refundOrder"],
+      methods: ["createOrder", "captureOrder", "getOrder", "autonomousPurchase", "autonomousPurchaseWithGuardrails", "compileAndSetPolicy", "refundOrder", "listSubscriptions", "getSubscription", "cancelSubscription", "reviewSubscriptions"],
       mcp: process.env.PAYPAL_MCP_URL ? "enabled" : "disabled",
     };
   }

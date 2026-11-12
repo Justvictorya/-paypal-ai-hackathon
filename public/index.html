@@ -552,6 +552,20 @@
           <div class="chips hidden" id="policyChips"></div>
         </div>
 
+        <!-- Subscriptions: the real money-leak problem. Free trials that
+             auto-renew and charge you after you forgot you signed up. Vouch
+             watches them, checks each against your policy, and cancels the
+             ones that shouldn't renew BEFORE the charge hits. -->
+        <div class="card" id="subscriptionsCard" style="margin-top: 16px;">
+          <div class="card-header">
+            <h2 class="card-title font-fraunces">Subscriptions</h2>
+            <button class="btn btn-secondary" id="reviewSubscriptions" style="padding: 6px 12px; font-size: 0.8rem;">Review & Cancel</button>
+          </div>
+          <div id="subscriptionList" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="color: var(--slate); font-size: 0.85rem;">Click Review to scan your PayPal subscriptions against your spending policy.</div>
+          </div>
+        </div>
+
 <div class="card">
            <div class="card-header">
              <h2 class="card-title font-fraunces">Storefront</h2>
@@ -5125,7 +5139,54 @@ const PRODUCT_CATALOG = [
       currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null, maxWeekly: 300 };
       renderStorefront();
       // Don't render chips on reset - keep hidden until compile
+      if (typeof refreshSuggestions === 'function') refreshSuggestions();
     });
+
+    // ---- Subscriptions: scan PayPal subscriptions, cancel the ones that
+    // would breach the active policy before they auto-renew.
+    document.getElementById('reviewSubscriptions').addEventListener('click', async () => {
+      const list = document.getElementById('subscriptionList');
+      const btn = document.getElementById('reviewSubscriptions');
+      list.innerHTML = '<div style="color: var(--slate); font-size: 0.85rem;">Scanning subscriptions…</div>';
+      btn.disabled = true;
+      try {
+        const res = await fetch(`${API_BASE}/subscriptions/review`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error);
+
+        list.innerHTML = '';
+        if (data.total === 0) {
+          list.innerHTML = '<div style="color: var(--slate); font-size: 0.85rem;">No active subscriptions found.</div>';
+        } else {
+          [...data.cancelled, ...data.kept].forEach(({ sub, reason, daysUntil }) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card);';
+            const isCancelled = data.cancelled.some(c => c.sub.id === sub.id);
+            row.style.borderLeft = `3px solid ${isCancelled ? 'var(--bad)' : 'var(--ok)'}`;
+            row.innerHTML = `
+              <div>
+                <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(sub.product || sub.id)}</div>
+                <div style="color: var(--slate); font-size: 0.8rem;">$${(sub.amount || 0).toFixed(2)} · renews in ${daysUntil ?? 'n/a'}d · ${escapeHtml(reason)}</div>
+              </div>
+              <span style="font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; background: ${isCancelled ? 'var(--bad)' : 'var(--ok)'}; color: #fff;">
+                ${isCancelled ? 'CANCELLED' : 'KEPT'}
+              </span>`;
+            list.appendChild(row);
+          });
+        }
+        showToast(`Reviewed ${data.total} subscription(s), cancelled ${data.cancelled.length}`, data.cancelled.length ? 'success' : 'info');
+        if (data.dossier) addLogLine(`SUBSCRIPTIONS: ${data.cancelled.length} cancelled, ${data.kept.length} kept`, data.cancelled.length ? 'bad' : 'ok');
+      } catch (e) {
+        list.innerHTML = `<div style="color: var(--bad); font-size: 0.85rem;">Failed: ${escapeHtml(e.message)}</div>`;
+        showToast('Subscription review failed: ' + e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
 
     function renderChips(policy) {
       policyChips.innerHTML = '';
