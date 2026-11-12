@@ -5249,13 +5249,15 @@ const PRODUCT_CATALOG = [
       grid.innerHTML = '';
       const cat = (currentPolicy.category || '').toLowerCase();
 
-      const visible = PRODUCT_CATALOG.filter(p => {
-        if (p.attack) return true; // always show the attack demo
-        if (!cat) return true;     // no policy = show everything
-        // Match product category against the policy category using the same
-        // logic as the guardrail (keyword + substring matching).
-        return categoryMatchesClient(p.category, cat);
-      });
+      // Products surface ONLY through the custom-item dropdown as the user
+      // types — no full-catalog grid spam on load. The grid keeps a single
+      // home for the attack demo so the injection test stays discoverable.
+      const visible = PRODUCT_CATALOG.filter(p => p.attack);
+
+      if (visible.length === 0) {
+        grid.innerHTML = '<div style="color: var(--slate); font-size: 0.85rem; padding: 12px 0;">Type an item name above to see matching products in the dropdown.</div>';
+        return;
+      }
 
       visible.forEach(p => {
         const card = document.createElement('div');
@@ -5826,10 +5828,8 @@ const prompt = isAttack
 
     // Initial storefront render — must run after PRODUCT_CATALOG,
     // CATEGORY_KEYWORDS, and renderStorefront are all defined to avoid the
-    // temporal-dead-zone.
-    // No category = no spending policy compiled yet, so the storefront shows
-    // the full catalog (plus the attack demo) instead of silently filtering
-    // to one category. The policy summary already reads "No policy set".
+    // temporal-dead-zone. The grid stays empty by default: products surface
+    // only through the custom-item dropdown as the user types.
     currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null, maxWeekly: 300 };
     policyChips.classList.add('hidden');
     renderStorefront();
