@@ -171,7 +171,9 @@ app.post("/v1/subscriptions/:subscriptionId/cancel", async (req, res) => {
 
 app.post("/v1/subscriptions/review", async (req, res) => {
   try {
-    const result = await agent.reviewSubscriptions();
+    // The buyer's compiled policy may be passed so the review uses the same
+    // rules as purchases. Without one the agent falls back to its default.
+    const result = await agent.reviewSubscriptions(req.body?.policy);
     res.json({ ok: true, ...result });
   } catch (err) {
     res.status(400).json({ ok: false, error: err.message, demo: agent.demo });

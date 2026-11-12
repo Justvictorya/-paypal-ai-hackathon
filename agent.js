@@ -502,9 +502,28 @@ return { refund, demo: false, dossier: entry };
 
   // Scan all subscriptions; cancel any whose next charge would breach the
   // active spending policy. Returns what was cancelled and why.
-  async reviewSubscriptions() {
+  // An optional policy override may be passed (e.g. from the review route);
+  // when none is set, a conservative recurring-charge default is used so the
+  // free-trial money-leak demo cancels something out of the box.
+  async reviewSubscriptions(policyOverride) {
+    // In demo mode reset each review so the auto-cancel demo is re-runnable
+    // (a real PayPal agreement stays cancelled once cancelled). Reset before
+    // listing so the scan sees fresh ACTIVE state, not a prior cancellation.
+    if (this.demo) {
+      this.subscriptions = this.subscriptions.map(s => ({
+        ...s, status: 'ACTIVE', cancelledAt: undefined, cancelReason: undefined
+      }));
+    }
     const { subscriptions } = await this.listSubscriptions();
-    const policy = this.getActivePolicy();
+    const policy = policyOverride || this.getActivePolicy() || {};
+    const effective = {
+      maxTotal: policy.maxTotal ?? 50,
+      maxPerItem: policy.maxPerItem ?? 20,
+      maxItems: policy.maxItems ?? 5,
+      maxWeekly: policy.maxWeekly ?? 200,
+      timeWindow: policy.timeWindow ?? null,
+      category: policy.category ?? null,
+    };
     const now = new Date();
     const cancelled = [];
     const kept = [];
@@ -517,8 +536,8 @@ return { refund, demo: false, dossier: entry };
 
       // Cancel if the renewal is imminent and would breach the policy.
       const breaches = [];
-      if (policy.maxTotal && amount > policy.maxTotal) breaches.push(`$${amount} exceeds max $${policy.maxTotal}`);
-      if (policy.maxPerItem && amount > policy.maxPerItem) breaches.push(`$${amount} exceeds per-item cap $${policy.maxPerItem}`);
+      if (effective.maxTotal && amount > effective.maxTotal) breaches.push(`$${amount} exceeds max $${effective.maxTotal}`);
+      if (effective.maxPerItem && amount > effective.maxPerItem) breaches.push(`$${amount} exceeds per-item cap $${effective.maxPerItem}`);
 
       if (daysUntil !== null && daysUntil <= 3 && breaches.length > 0) {
         await this.cancelSubscription(sub.id, `Policy breach: ${breaches.join('; ')}`);

@@ -759,6 +759,7 @@
   <script>
     const API_BASE = '/v1';
     let currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null };
+    let policyCompiled = false;
     let currentOrderId = null;
     let currentCaptureId = null;
     let currentProduct = null; // last product the user clicked
@@ -5102,9 +5103,10 @@ const PRODUCT_CATALOG = [
           body: JSON.stringify({ plainLanguagePolicy: text })
         });
         const data = await res.json();
-        if (!data.ok) throw new Error(data.error);
-        
+if (!data.ok) throw new Error(data.error);
+
         currentPolicy = data.policy;
+        policyCompiled = true;
         renderChips(data.policy);
         renderStorefront();
         // Refresh the custom-item dropdown to match the new category.
@@ -5136,6 +5138,7 @@ const PRODUCT_CATALOG = [
       policyChips.innerHTML = '';
       policyChips.classList.add('hidden');
       policySummary.textContent = 'No policy set';
+      policyCompiled = false;
       currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null, maxWeekly: 300 };
       renderStorefront();
       // Don't render chips on reset - keep hidden until compile
@@ -5150,7 +5153,15 @@ const PRODUCT_CATALOG = [
       list.innerHTML = '<div style="color: var(--slate); font-size: 0.85rem;">Scanning subscriptions…</div>';
       btn.disabled = true;
       try {
-        const res = await fetch(`${API_BASE}/subscriptions/review`, { method: 'POST' });
+        const res = await fetch(`${API_BASE}/subscriptions/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Send the compiled policy when one exists so the bot cancels
+        // against the same rules the buyer set for purchases. Without a
+        // compiled policy the agent uses its free-trial default (≤$20/item)
+        // so the demo cancels something out of the box.
+        body: JSON.stringify({ policy: policyCompiled ? currentPolicy : null })
+      });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error);
 
@@ -5831,6 +5842,7 @@ const prompt = isAttack
     // temporal-dead-zone. The grid stays empty by default: products surface
     // only through the custom-item dropdown as the user types.
     currentPolicy = { maxTotal: 150, maxItems: 2, maxPerItem: 150, timeWindow: null, maxWeekly: 300 };
+    policyCompiled = false;
     policyChips.classList.add('hidden');
     renderStorefront();
 
