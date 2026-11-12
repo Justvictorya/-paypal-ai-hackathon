@@ -5220,7 +5220,7 @@ const PRODUCT_CATALOG = [
       const fakeId = 'custom-' + Math.random().toString(36).slice(2, 8);
       const customProduct = { id: fakeId, category: name, name, price, desc: 'Custom item', attack: false, custom: true };
       currentProduct = customProduct;
-      await triggerPurchase(fakeId);
+      await triggerPurchase(fakeId, customProduct);
     });
 
     // Dynamic dropdown: as the user types, show only products that (a) match
@@ -5266,9 +5266,12 @@ const PRODUCT_CATALOG = [
     }
 
     // Purchase flow
-    async function triggerPurchase(productId) {
+    async function triggerPurchase(productId, explicitProduct) {
       resetPipeline();
-      const product = PRODUCT_CATALOG.find(p => p.id === productId);
+      // Custom items (typed by the buyer) pass their product object
+      // directly — their id is generated client-side and doesn't exist
+      // in PRODUCT_CATALOG, so a pure id lookup would always fail.
+      const product = explicitProduct || PRODUCT_CATALOG.find(p => p.id === productId);
       if (!product) { showToast('Product not found', 'error'); return; }
       currentProduct = product;
       const isAttack = product.attack;
