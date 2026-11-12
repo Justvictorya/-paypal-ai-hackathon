@@ -180,6 +180,18 @@ app.post("/v1/subscriptions/review", async (req, res) => {
   }
 });
 
+// Buyer override: keep a subscription the bot would have cancelled, for a
+// chosen number of days. The decision lands in the audit dossier.
+app.post("/v1/subscriptions/:id/keep", async (req, res) => {
+  try {
+    const days = parseInt(req.body?.days, 10) || 30;
+    const result = await agent.keepSubscription(req.params.id, days, req.body?.note);
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message, demo: agent.demo });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`PayPal autonomous purchase agent listening on http://localhost:${PORT}`);
   console.log(`  mode:     ${agent.demo ? "DEMO (simulated)" : "sandbox"}`);

@@ -552,19 +552,21 @@
           <div class="chips hidden" id="policyChips"></div>
         </div>
 
-        <!-- Subscriptions: the real money-leak problem. Free trials that
-             auto-renew and charge you after you forgot you signed up. Vouch
-             watches them, checks each against your policy, and cancels the
-             ones that shouldn't renew BEFORE the charge hits. -->
-        <div class="card" id="subscriptionsCard" style="margin-top: 16px;">
-          <div class="card-header">
-            <h2 class="card-title font-fraunces">Subscriptions</h2>
-            <button class="btn btn-secondary" id="reviewSubscriptions" style="padding: 6px 12px; font-size: 0.8rem;">Review & Cancel</button>
-          </div>
-          <div id="subscriptionList" style="display: flex; flex-direction: column; gap: 8px;">
-            <div style="color: var(--slate); font-size: 0.85rem;">Click Review to scan your PayPal subscriptions against your spending policy.</div>
-          </div>
-        </div>
+<!-- Subscriptions: the real money-leak problem. Free trials that
+     auto-renew and charge you after you forgot you signed up. Vouch
+     lists the apps connected to your PayPal account, shows when each
+     trial or subscription ends, and auto-cancels the ones that would
+     breach your spending policy before the charge hits — unless you
+     tell it to keep one, for how long. -->
+    <div class="card" id="subscriptionsCard" style="margin-top: 16px;">
+      <div class="card-header">
+        <h2 class="card-title font-fraunces">Subscriptions</h2>
+        <button class="btn btn-primary" id="reviewSubscriptions" style="padding: 6px 12px; font-size: 0.8rem;">Review & Auto-Cancel</button>
+      </div>
+      <div id="subscriptionList" style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="color: var(--slate); font-size: 0.85rem;">Click Review to scan the apps connected to your PayPal account, see when each trial ends, and auto-cancel the ones that would breach your policy before they charge.</div>
+      </div>
+    </div>
 
 <div class="card">
            <div class="card-header">
@@ -5167,26 +5169,105 @@ if (!data.ok) throw new Error(data.error);
 
         list.innerHTML = '';
         if (data.total === 0) {
-          list.innerHTML = '<div style="color: var(--slate); font-size: 0.85rem;">No active subscriptions found.</div>';
+          list.innerHTML = '<div style="color: var(--slate); font-size: 0.85rem;">No apps connected to your PayPal account.</div>';
         } else {
+          // Show every connected app as a dropdown row: name, when the
+          // trial/subscription ends, and what the bot did. Beside each one a
+          // "Keep for ___ days" control lets the buyer override the auto-cancel.
           [...data.cancelled, ...data.kept].forEach(({ sub, reason, daysUntil }) => {
             const row = document.createElement('div');
-            row.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card);';
+            row.style.cssText = 'display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card);';
             const isCancelled = data.cancelled.some(c => c.sub.id === sub.id);
             row.style.borderLeft = `3px solid ${isCancelled ? 'var(--bad)' : 'var(--ok)'}`;
-            row.innerHTML = `
-              <div>
-                <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(sub.product || sub.id)}</div>
-                <div style="color: var(--slate); font-size: 0.8rem;">$${(sub.amount || 0).toFixed(2)} · renews in ${daysUntil ?? 'n/a'}d · ${escapeHtml(reason)}</div>
-              </div>
-              <span style="font-size: 0.75rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; background: ${isCancelled ? 'var(--bad)' : 'var(--ok)'}; color: #fff;">
-                ${isCancelled ? 'CANCELLED' : 'KEPT'}
-              </span>`;
+
+            const endDate = sub.nextBillingDate
+              ? new Date(sub.nextBillingDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+              : 'n/a';
+
+            const statusText = isCancelled ? 'AUTO-CANCELLED' : 'KEPT';
+            const statusColor = isCancelled ? 'var(--bad)' : 'var(--ok)';
+
+            const keepWrap = document.createElement('div');
+            keepWrap.style.display = 'flex';
+            keepWrap.style.alignItems = 'center';
+            keepWrap.style.gap = '6px';
+
+            const daysInput = document.createElement('input');
+            daysInput.type = 'number';
+            daysInput.min = '1';
+            daysInput.max = '365';
+            daysInput.value = '30';
+            daysInput.style.width = '60px';
+            daysInput.style.padding = '4px 6px';
+            daysInput.style.border = '1px solid var(--border)';
+            daysInput.style.borderRadius = '6px';
+            daysInput.style.background = 'var(--input-bg)';
+            daysInput.style.color = 'var(--ink)';
+            daysInput.style.fontSize = '0.8rem';
+            daysInput.title = 'Days to keep this subscription';
+
+            const keepBtn = document.createElement('button');
+            keepBtn.className = 'btn btn-secondary';
+            keepBtn.style.padding = '4px 10px';
+            keepBtn.style.fontSize = '0.75rem';
+            keepBtn.textContent = 'Keep for';
+            keepBtn.title = `Keep ${sub.product || sub.id} for the chosen number of days`;
+            keepBtn.onclick = async () => {
+              const days = parseInt(daysInput.value, 10) || 30;
+              keepBtn.disabled = true;
+              keepBtn.textContent = 'Keeping…';
+              try {
+                const r = await fetch(`${API_BASE}/subscriptions/${encodeURIComponent(sub.id)}/keep`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ days })
+                });
+                const d = await r.json();
+                if (!d.ok) throw new Error(d.error);
+                showToast(`Kept ${sub.product || sub.id} for ${days} days`, 'success');
+                addLogLine(`SUBSCRIPTION: kept ${sub.product || sub.id} for ${days}d by buyer override`, 'ok');
+                keepBtn.textContent = `Kept ${days}d`;
+                keepBtn.className = 'btn';
+                keepBtn.style.background = 'var(--ok)';
+                keepBtn.style.color = '#fff';
+              } catch (e) {
+                keepBtn.disabled = false;
+                keepBtn.textContent = 'Keep for';
+                showToast('Keep failed: ' + e.message, 'error');
+              }
+            };
+
+            keepWrap.appendChild(daysInput);
+            keepWrap.appendChild(keepBtn);
+
+            const subAmount = parseFloat(sub.billingInfo?.amount?.value || sub.amount || 0);
+            const amountText = subAmount ? `$${subAmount.toFixed(2)}` : '';
+            const info = document.createElement('div');
+            info.style.flex = '1';
+            info.style.minWidth = '200px';
+            info.innerHTML = `
+              <div style="font-weight: 600; font-size: 0.9rem;">${escapeHtml(sub.product || sub.id)}</div>
+              <div style="color: var(--slate); font-size: 0.8rem;">
+                ${amountText} · ends ${endDate} · renews in ${daysUntil ?? 'n/a'}d · ${escapeHtml(reason)}
+              </div>`;
+
+            const badge = document.createElement('span');
+            badge.style.fontSize = '0.75rem';
+            badge.style.fontWeight = '700';
+            badge.style.padding = '3px 8px';
+            badge.style.borderRadius = '20px';
+            badge.style.background = statusColor;
+            badge.style.color = '#fff';
+            badge.textContent = statusText;
+
+            row.appendChild(info);
+            row.appendChild(badge);
+            row.appendChild(keepWrap);
             list.appendChild(row);
           });
         }
-        showToast(`Reviewed ${data.total} subscription(s), cancelled ${data.cancelled.length}`, data.cancelled.length ? 'success' : 'info');
-        if (data.dossier) addLogLine(`SUBSCRIPTIONS: ${data.cancelled.length} cancelled, ${data.kept.length} kept`, data.cancelled.length ? 'bad' : 'ok');
+        showToast(`Reviewed ${data.total} app(s), auto-cancelled ${data.cancelled.length}`, data.cancelled.length ? 'success' : 'info');
+        if (data.dossier) addLogLine(`SUBSCRIPTIONS: ${data.cancelled.length} auto-cancelled, ${data.kept.length} kept`, data.cancelled.length ? 'bad' : 'ok');
       } catch (e) {
         list.innerHTML = `<div style="color: var(--bad); font-size: 0.85rem;">Failed: ${escapeHtml(e.message)}</div>`;
         showToast('Subscription review failed: ' + e.message, 'error');
@@ -5275,7 +5356,6 @@ if (!data.ok) throw new Error(data.error);
         card.className = 'product-card' + (p.attack ? ' attack' : '');
         card.innerHTML = `
           <div class="product-name">${p.name}</div>
-          <div class="product-price font-fraunces">$${p.price}</div>
           <div class="product-desc">${p.desc}</div>
           ${p.attack ? `<div class="product-injection font-mono">${p.injection}</div>` : ''}
           <button class="btn ${p.attack ? 'btn-danger' : 'btn-primary'}" style="width: 100%;" onclick="triggerPurchase('${p.id}')">
@@ -5339,7 +5419,9 @@ if (!data.ok) throw new Error(data.error);
       candidates.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.name;
-        opt.textContent = `${p.name} — $${p.price}`;
+        // No price tag in the listing — the buyer sets the amount; prices are
+        // not our cross to carry. The value still feeds the price field.
+        opt.textContent = p.name;
         opt.dataset.price = p.price;
         suggestionList.appendChild(opt);
       });

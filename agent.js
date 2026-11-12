@@ -500,6 +500,27 @@ return { refund, demo: false, dossier: entry };
     })();
   }
 
+  // User override: keep a subscription that the auto-cancel bot would have
+  // dropped, for a chosen number of days. Recorded in the dossier so the
+  // decision is auditable.
+  keepSubscription(subscriptionId, days = 30, note = 'Kept by buyer override') {
+    if (this.demo) {
+      const sub = this.subscriptions.find(s => s.id === subscriptionId);
+      if (!sub) throw new Error(`Subscription not found: ${subscriptionId}`);
+      sub.keptUntil = days;
+      sub.keptAt = new Date().toISOString();
+      sub.keptNote = note;
+      const entry = this.createDossierEntry('subscription_kept', { subscriptionId, days, note, subscription: sub });
+      return { demo: true, subscription: sub, dossier: entry, keptUntil: days };
+    }
+    return (async () => {
+      const token = await clientCredentialsToken();
+      const sub = await paypalFetch(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: 'GET', token });
+      const entry = this.createDossierEntry('subscription_kept', { subscriptionId, days, note, subscription: sub });
+      return { demo: false, subscription: sub, dossier: entry, keptUntil: days };
+    })();
+  }
+
   // Scan all subscriptions; cancel any whose next charge would breach the
   // active spending policy. Returns what was cancelled and why.
   // An optional policy override may be passed (e.g. from the review route);
@@ -556,7 +577,7 @@ return { refund, demo: false, dossier: entry };
       version: "1.0.0",
       demo: this.demo,
       sandboxBase: SANDBOX_BASE,
-      methods: ["createOrder", "captureOrder", "getOrder", "autonomousPurchase", "autonomousPurchaseWithGuardrails", "compileAndSetPolicy", "refundOrder", "listSubscriptions", "getSubscription", "cancelSubscription", "reviewSubscriptions"],
+      methods: ["createOrder", "captureOrder", "getOrder", "autonomousPurchase", "autonomousPurchaseWithGuardrails", "compileAndSetPolicy", "refundOrder", "listSubscriptions", "getSubscription", "cancelSubscription", "reviewSubscriptions", "keepSubscription"],
       mcp: process.env.PAYPAL_MCP_URL ? "enabled" : "disabled",
     };
   }
