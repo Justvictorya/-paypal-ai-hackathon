@@ -5093,6 +5093,10 @@ const PRODUCT_CATALOG = [
         currentPolicy = data.policy;
         renderChips(data.policy);
         renderStorefront();
+        // Refresh the custom-item dropdown to match the new category.
+        // Guarded because the suggestion elements are defined later in the
+        // script — on first paint they're not ready yet.
+        if (customItemInput && typeof refreshSuggestions === 'function') refreshSuggestions();
         
         // Build summary from compiled policy
         const parts = [];
@@ -5244,13 +5248,24 @@ const PRODUCT_CATALOG = [
       if (query) {
         candidates = candidates.filter(p => p.name.toLowerCase().startsWith(query));
       }
-      // Alphabetical by name.
+      // Alphabetical by name. When nothing is typed, cap the list so the
+      // dropdown isn't a 4,000-item wall — show the first 20 matches.
       candidates.sort((a, b) => a.name.localeCompare(b.name));
+      if (!query) candidates = candidates.slice(0, 20);
 
       suggestionList.innerHTML = '';
+      if (candidates.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = 'No matching items';
+        opt.disabled = true;
+        suggestionList.appendChild(opt);
+        return;
+      }
       candidates.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.name;
+        opt.textContent = `${p.name} — $${p.price}`;
         opt.dataset.price = p.price;
         suggestionList.appendChild(opt);
       });
@@ -5263,6 +5278,9 @@ const PRODUCT_CATALOG = [
         const exact = PRODUCT_CATALOG.find(p => p.name.toLowerCase() === customItemInput.value.trim().toLowerCase());
         if (exact && !customPriceInput.value) customPriceInput.value = exact.price;
       });
+      // Populate on load and whenever the policy changes, so the dropdown
+      // reflects the active category instead of a stale full-catalog dump.
+      refreshSuggestions();
     }
 
     // Purchase flow
